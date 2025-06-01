@@ -45,4 +45,4 @@ items+=("1:5:2")
 items+=("3:5:2")
 items+=("6:5:5")
 
-export items_strings=$(IFS='|'; echo "${items[*]}")
+export items_string=$(IFS='|'; echo "${items[*]}")

@@ -32,12 +32,39 @@ draw_tile() {
     [ -f "$sprite" ] || sprite="./sprites/blank.txt"
     [ -z "$color" ] && color="$BLACK"
     read -r row col <<<"$(get_screen_position "$x" "$y")"
-
+    
+    if [[ $sprite = "./sprites/blank.txt" && ${spikes["$x,$y"]}  ]]; then
+        if [[ ${spikes["$x,$y"]} == 1 ]]; then
+            color="$WHITE"
+        else
+            color="$BLACK"
+        fi
+        sprite="./sprites/spike.txt"
+    fi
     mapfile -t tile_lines < "$sprite"
 
     for ((i = 0; i < TILE_SIZE_Y; i++)); do
         tput cup $((row + i)) "$col"
-        printf "%s%s%s" "$color" "${tile_lines[i]:0:TILE_SIZE_X}" "$RESET"
+        line="${tile_lines[i]:0:TILE_SIZE_X}"
+
+        if [[ $i == 1 &&  ${spikes["$x,$y"]} ]]; then
+            left="${line:0:1}"
+            center="${line:1:3}"
+            right="${line:4:1}"
+            if [[ ${spikes["$x,$y"]} == 1 ]]; then
+                spike_color="$WHITE"
+            else
+                spike_color="$BLACK"
+            fi
+
+            printf "%s%s" "$color" "$left"
+            printf "%s%s" "$spike_color" "$RESET"
+            printf "%s%s" "$color" "${center:1:1}"
+            printf "%s%s" "$spike_color" "$RESET"
+            printf "%s%s%s" "$color" "$right" "$RESET"
+        else
+            printf "%s%s%s" "$color" "$line" "$RESET"
+        fi
     done
 }
 
@@ -149,11 +176,26 @@ save_tiles_to_file() {
     for key in "${!tiles[@]}"; do
         echo "$key:${tiles[$key]}" >> "$file"
     done
+    echo "---Spikes" >> "$file"
+    for key in "${!spikes[@]}"; do
+        echo "$key:${spikes[$key]}" >> "$file"
+    done
 }
 
 map="$1"
 [ -f "$map" ] || exit 1
 . "$map"
+declare -A tiles
+declare -A spikes
+
+IFS='|' read -ra items <<< "$items_string"
+IFS='|' read -ra spike_entries <<< "$spike_string"
+
+
+for spike in "${spike_entries[@]}"; do
+    IFS=':' read -r x y value <<< "$spike"
+    spikes["$x,$y"]="$value"
+done
 
 old_x=$selected_tile_x
 old_y=$selected_tile_y
@@ -170,8 +212,6 @@ draw_status
 echo
 echo -en "${RED}HJKL${RESET}/${RED}WSAD${RESET}: Movement, ${RED}R${RESET}: Reset, ${RED}Q${RESET}: Quit"
 
-IFS='|' read -ra items <<< "$items_strings"
-declare -A tiles
 for item in "${items[@]}"; do
     IFS=':' read -r x y type <<< "$item"
     case "$type" in
@@ -217,6 +257,11 @@ while :; do
         selected_tile_y=$new_y
         draw_tile "$selected_tile_x" "$selected_tile_y" ./sprites/selected.txt "$RED"
     fi
+
+    if [[ "${spikes["$selected_tile_x,$selected_tile_y"]}" == 1 ]]; then
+        ((moves--))
+    fi
+    # Remove move on spike
     ((moves--))
     draw_status
     check_win
