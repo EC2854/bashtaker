@@ -12,12 +12,44 @@ MAGENTA=$(tput setaf 5)
 # Grid config
 TILE_SIZE_X=5
 TILE_SIZE_Y=3
-BAR_HEIGHT=2;
-
+BAR_HEIGHT=2
 
 mapfile -t blank <<< $'╭───╮\n│   │\n╰───╯'
-mapfile -t wall  <<< ""
+mapfile -t wall  <<< $'     \n     \n     '
 
+declare -A tiles
+declare -A spikes
+
+load_map() {
+    local map=$1
+    [ -f "$map" ] || exit 1
+
+    moves=$(jq '.moves' "$map")
+
+    Y_TILES=$(jq '.tiles | length' "$map")
+    X_TILES=$(jq '.tiles[0] | length' "$map")
+
+    for (( y=0; y<Y_TILES; y++ )); do
+        for (( x=0; x<X_TILES; x++ )); do
+            char=$(jq -r ".tiles[$y] | .[$x:$((x+1))]" "$map")
+                       if [[ "$char" != "_" ]]; then
+                case "$char" in
+                    "p")
+                        player_x=$x
+                        player_y=$y
+                    ;;
+                    *)
+                        tiles["$x,$y"]=$char
+                    ;;
+                esac
+            fi
+            char=$(jq -r ".spikes[$y] | .[$x:$((x+1))]" "$map")
+            if [[ "$char" != "_" ]]; then
+                spikes["$x,$y"]=$char
+            fi
+        done
+    done
+}
 get_screen_position() {
     local x=$1
     local y=$2
@@ -34,7 +66,7 @@ get_tile_info() {
         color="$RED"
     else
         case "$type" in
-            1) char="";  color="$BLACK"   ;; # Wall
+            1) char=" "; color="$BLACK"   ;; # Wall
             2) char=""; color="$WHITE"   ;; # Rock
             3) char=""; color="$WHITE"   ;; # Skeleton
             5) char="󰋑"; color="$MAGENTA" ;; # Girl
@@ -43,13 +75,31 @@ get_tile_info() {
     fi
     echo "$char,$color,$type"
 }
-# Draw a tile
+get_spike_info() {
+    local x=$1
+    local y=$2
+    spike=" "
+    spike_color="$BLACK"
+
+    if [[ ${spikes["$x,$y"]} ]];then 
+        spike=""
+        if [[ ${spikes["$x,$y"]} == 1 ]]; then
+            spike_color="$WHITE"
+        else
+            spike_color="$BLACK"
+        fi
+    fi
+    echo "$spike,$spike_color"
+}
 draw_tile() {
     local x=$1
     local y=$2
 
     local char color type
     IFS="," read -r char color type <<<"$(get_tile_info "$x" "$y")"
+
+    local spike spike_color
+    IFS="," read -r spike spike_color <<<"$(get_spike_info "$x" "$y")"
 
     local row col
     read -r row col <<<"$(get_screen_position "$x" "$y")"
@@ -61,16 +111,6 @@ draw_tile() {
         tput cup $((row + i)) "$col"
         line="${tile[i]:0:TILE_SIZE_X}"
         if [[ $i == 1 ]]; then
-            spike=" "
-            if [[ ${spikes["$x,$y"]} ]];then 
-                spike=""
-                if [[ ${spikes["$x,$y"]} == 1 ]]; then
-                    spike_color="$WHITE"
-                else
-                    spike_color="$BLACK"
-                fi
-            fi
-
             printf "%s%s" "$color" "${line:0:1}"
             printf "%s%s" "$spike_color" "$spike"
             printf "%s%s" "$color" "$char"
@@ -86,7 +126,7 @@ draw_grid() {
     local x y
     for ((y = 0; y < Y_TILES; y++)); do
         for ((x = 0; x < X_TILES; x++)); do
-            draw_tile "$x" "$y" 0
+            draw_tile "$x" "$y"
         done
     done
     for tile in "${!tiles[@]}"; do
@@ -185,23 +225,17 @@ check_win() {
 
     for pos in "${neighbors[@]}"; do
         if [[ "${tiles["$pos"]}" == 5 ]]; then
-        tput cup $((Y_TILES * TILE_SIZE_Y + 2)) 0
+        tput cup $((Y_TILES * TILE_SIZE_Y + BAR_HEIGHT)) 0
             message="${GREEN}You Won! ${RESET}"
             exit 0
         fi
     done
 }
 
-# Load map file
-map="$1"
-[ -f "$map" ] || exit 1
-. "$map"
-
-old_x=$player_x
-old_y=$player_y
-
 direction=""
 message="bye!"
+
+load_map "$1"
 
 clear
 tput civis

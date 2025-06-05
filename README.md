@@ -8,9 +8,10 @@
 git clone https://github.com/EC2854/bashtaker && cd bashtaker
 ```
 ## Run the game
-Use the main script with one of the map files:
+- Install `jq` (for map loading)
+- Use the main script with one of the map files:
 ```sh
-./bashtaker.sh maps/1.sh
+./bashtaker.sh maps/1.json
 ```
 
 # Why bash? 
