@@ -8,11 +8,14 @@ WHITE=$(tput setaf 7)
 RED=$(tput setaf 1)
 GREEN=$(tput setaf 2)
 MAGENTA=$(tput setaf 5)
+YELLOW=$(tput setaf 3)
 
 # Grid config
 TILE_SIZE_X=5
 TILE_SIZE_Y=3
 BAR_HEIGHT=2
+
+has_key=0
 
 mapfile -t blank <<< $'╭───╮\n│   │\n╰───╯'
 mapfile -t wall  <<< $'     \n     \n     '
@@ -29,11 +32,16 @@ declare -A KEYS=(
     [r]="reset"
     [q]="quit"
 )
+
 load_map() {
     local map=$1
     [ -f "$map" ] || exit 1
 
     moves=$(jq '.moves' "$map")
+    spikes_move=$(jq '.spikes_move' "$map")
+
+    key_x=$(jq '.key_x' "$map")
+    key_y=$(jq '.key_y' "$map")
 
     local tile_rows=() spike_rows=()
     local tile_row spike_row
@@ -77,6 +85,7 @@ get_tile_info() {
     local x=$1
     local y=$2
     local type=${tiles["$x,$y"]}
+    local color char
     if [[ "$player_x" == "$x" && "$player_y" == "$y" ]];then 
         char=""
         color="$RED"
@@ -85,9 +94,14 @@ get_tile_info() {
             1) char=" "; color="$BLACK"   ;; # Wall
             2) char=""; color="$WHITE"   ;; # Rock
             3) char=""; color="$WHITE"   ;; # Skeleton
+            4) char="󰌾"; color="$YELLOW"  ;; # Lock
             5) char="󰋑"; color="$MAGENTA" ;; # Girl
             *) char=" "; color="$BLACK"   ;;
         esac
+    fi
+    if [[ "$key_x" == "$x" && "$key_y" == "$y" ]];then 
+        [[ "$char" == " " ]] && char="󰌆"
+        color="$YELLOW"
     fi
     echo "$char,$color,$type"
 }
@@ -150,23 +164,6 @@ draw_grid() {
         draw_tile "$x" "$y"
     done
 }
-
-is_blocked() {
-    local x=$1
-    local y=$2
-
-    # out of bounds
-    if (( x < 0 || x >= X_TILES || y < 0 || y >= Y_TILES )); then
-        return 0
-    fi
-
-    # blocked by wall or rock
-    case "${tiles["$x,$y"]}" in
-        1|2) return 0 ;;
-    esac
-
-    return 1
-}
 get_coords() {
     local x=$1
     local y=$2
@@ -182,7 +179,30 @@ get_coords() {
 
     echo "$new_x $new_y"
 }
+is_blocked() {
+    local x=$1
+    local y=$2
 
+    # out of bounds
+    if (( x < 0 || x >= X_TILES || y < 0 || y >= Y_TILES )); then
+        return 0
+    fi
+
+    # blocked by wall or rock
+    case "${tiles["$x,$y"]}" in
+        1|2) return 0 ;;
+        4) 
+            if [[ "$has_key" == 1 ]]; then
+                tiles["$x,$y"]=0
+                return 1
+            else 
+                return 0
+            fi
+        ;;
+    esac
+
+    return 1
+}
 can_push() {
     local x=$1
     local y=$2
@@ -191,13 +211,10 @@ can_push() {
     local new_x new_y
     read -r new_x new_y <<<"$(get_coords "$x" "$y" "$direction")"
 
-    if (( new_x < 0 || new_x >= X_TILES || new_y < 0 || new_y >= Y_TILES )); then
-        return 1
-    fi
+    (( new_x < 0 || new_x >= X_TILES || new_y < 0 || new_y >= Y_TILES )) && return 1
     [[ "${tiles["$new_x,$new_y"]}" != 0 && -n "${tiles["$new_x,$new_y"]}" ]] && return 1
     return 0
 }
-
 push() {
     local x=$1
     local y=$2
@@ -218,12 +235,16 @@ push() {
 
     tiles["$x,$y"]="0"
     draw_tile "$x" "$y"
-
-    tiles["$new_x,$new_y"]="$type"
-    draw_tile "$new_x" "$new_y"
+    if ! [[ $type == 3 && ${spikes["$new_x,$new_y"]} == 1 ]];then 
+        tiles["$new_x,$new_y"]="$type"
+        draw_tile "$new_x" "$new_y"
+    fi
     return 0
 }
-
+draw_status() {
+    tput cup 0 0
+    printf "Moves left: %s%02d%s" "$RED" "$moves" "$RESET"
+}
 draw_keybinds() {
     local left up down right
     local output
@@ -241,10 +262,6 @@ draw_keybinds() {
     done
     output="$RED$left$down$up$right$RESET: Movement, $output"
     printf "\n%s\n" "${output%, }"
-}
-draw_status() {
-    tput cup 0 0
-    printf "Moves left: %s%02d%s" "$RED" "$moves" "$RESET"
 }
 check_win() {
     local x=$player_x
@@ -265,6 +282,27 @@ check_win() {
         fi
     done
 }
+check_key() {
+    local x=$1
+    local y=$2
+    if [[ "$has_key" == 0 && "$x" == "$key_x" && "$y" == "$key_y" ]]; then
+        has_key=1
+        unset key_x key_y
+    fi
+}
+switch_spikes() {
+    if [[ "$spikes_move" == 0 ]]; then 
+        return 0
+    fi
+    local x y
+    for spike in "${!spikes[@]}"; do
+        spikes["$spike"]=$(( spikes["$spike"] - 1)) 
+        spikes["$spike"]=${spikes["$spike"]//-} # make value abs
+        [[ ${spikes["$spike"]} == 1 && ${tiles["$spike"]} == 3 ]] && tiles["$spike"]=0 # Remove skeleton
+        IFS="," read -r x y <<<"$spike"
+        draw_tile "$x" "$y"
+    done
+}
 
 load_map "$1"
 
@@ -273,21 +311,21 @@ tput civis
 trap 'tput cnorm; tput sgr0; exit' EXIT
 
 draw_grid
-draw_tile "$player_x" "$player_y"
 draw_status
 draw_keybinds
 
-echo "$player_x, $player_y" >> log 
 # Main Loop
 while :; do
     if (( "$moves" <= 0 )); then 
         tput cup $((Y_TILES * TILE_SIZE_Y + BAR_HEIGHT)) 0
-        echo -e "${RED}Out of moves! Restarting...${RESET}"
+        printf "%sOut of moves! Restarting...%s" "$RED" "$RESET"
         sleep 1
         exec "$0" "$@"
     fi
+
     read -rsn1 key
 
+    switch_spikes
     case "${KEYS[$key]}" in
         "left"|"down"|"up"|"right") 
             direction="${KEYS[$key]}"
@@ -295,6 +333,7 @@ while :; do
         ;;
         "reset") exec "$0" "$@" ;;
         "quit") exit 0 ;;
+        *) continue ;;
     esac
 
     tile="${tiles["$new_x,$new_y"]}"
@@ -306,6 +345,8 @@ while :; do
                 old_y=$player_y
                 player_x=$new_x
                 player_y=$new_y
+
+                check_key "$player_x" "$player_y"
                 draw_tile "$old_x" "$old_y"
                 draw_tile "$player_x" "$player_y"
             fi
