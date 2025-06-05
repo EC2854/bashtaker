@@ -5,44 +5,44 @@
 # 4 - 
 # 5 - girl
 
-export X_TILES=7
-export Y_TILES=6
+X_TILES=7
+Y_TILES=6
 
-export moves=23
+moves=23
 
-export selected_tile_x=5
-export selected_tile_y=0
+player_x=5
+player_y=0
+
+declare -A tiles
+declare -A spikes
 
 # x:y:type
-items=()
-items+=("0:0:1")
-items+=("1:0:1")
-items+=("2:0:1")
-items+=("3:0:1")
-items+=("6:0:1")
+tiles["0,0"]=1
+tiles["1,0"]=1
+tiles["2,0"]=1
+tiles["3,0"]=1
+tiles["6,0"]=1
 
-items+=("0:1:1")
-items+=("3:1:3")
-items+=("6:1:1")
+tiles["0,1"]=1
+tiles["3,1"]=3
+tiles["6,1"]=1
 
-items+=("0:2:1")
-items+=("2:2:3")
-items+=("4:2:3")
-items+=("5:2:1")
-items+=("6:2:1")
+tiles["0,2"]=1
+tiles["2,2"]=3
+tiles["4,2"]=3
+tiles["5,2"]=1
+tiles["6,2"]=1
 
-items+=("2:3:1")
-items+=("3:3:1")
-items+=("4:3:1")
-items+=("5:3:1")
-items+=("6:3:1")
+tiles["2,3"]=1
+tiles["3,3"]=1
+tiles["4,3"]=1
+tiles["5,3"]=1
+tiles["6,3"]=1
 
-items+=("1:4:2")
-items+=("4:4:2")
-items+=("6:4:1")
+tiles["1,4"]=2
+tiles["4,4"]=2
+tiles["6,4"]=1
 
-items+=("1:5:2")
-items+=("3:5:2")
-items+=("6:5:5")
-
-export items_string=$(IFS='|'; echo "${items[*]}")
+tiles["1,5"]=2
+tiles["3,5"]=2
+tiles["6,5"]=5
