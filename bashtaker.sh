@@ -26,6 +26,10 @@ load_map() {
 
     moves=$(jq '.moves' "$map")
 
+    local tile_rows=() spike_rows=()
+    local tile_row spike_row
+    local char
+
     mapfile -t tile_rows < <(jq -r '.tiles[]' "$map")
     mapfile -t spike_rows < <(jq -r '.spikes[]' "$map")
 
@@ -46,9 +50,9 @@ load_map() {
                 fi
             fi
 
-            spike_char=${spike_row:$x:1}
-            if [[ "$spike_char" != "_" ]]; then
-                spikes["$x,$y"]=$spike_char
+            char=${spike_row:$x:1}
+            if [[ "$char" != "_" ]]; then
+                spikes["$x,$y"]=$char
             fi
         done
     done
@@ -235,7 +239,6 @@ check_win() {
     done
 }
 
-direction=""
 message="bye!"
 
 load_map "$1"
