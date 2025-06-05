@@ -26,26 +26,29 @@ load_map() {
 
     moves=$(jq '.moves' "$map")
 
-    Y_TILES=$(jq '.tiles | length' "$map")
-    X_TILES=$(jq '.tiles[0] | length' "$map")
+    mapfile -t tile_rows < <(jq -r '.tiles[]' "$map")
+    mapfile -t spike_rows < <(jq -r '.spikes[]' "$map")
+
+    X_TILES=${#tile_rows[0]}
+    Y_TILES=${#tile_rows[@]}
 
     for (( y=0; y<Y_TILES; y++ )); do
+        tile_row=${tile_rows[$y]}
+        spike_row=${spike_rows[$y]}
         for (( x=0; x<X_TILES; x++ )); do
-            char=$(jq -r ".tiles[$y] | .[$x:$((x+1))]" "$map")
-                       if [[ "$char" != "_" ]]; then
-                case "$char" in
-                    "p")
-                        player_x=$x
-                        player_y=$y
-                    ;;
-                    *)
-                        tiles["$x,$y"]=$char
-                    ;;
-                esac
-            fi
-            char=$(jq -r ".spikes[$y] | .[$x:$((x+1))]" "$map")
+            char=${tile_row:$x:1}
             if [[ "$char" != "_" ]]; then
-                spikes["$x,$y"]=$char
+                if [[ "$char" == "p" ]]; then
+                    player_x=$x
+                    player_y=$y
+                else
+                    tiles["$x,$y"]=$char
+                fi
+            fi
+
+            spike_char=${spike_row:$x:1}
+            if [[ "$spike_char" != "_" ]]; then
+                spikes["$x,$y"]=$spike_char
             fi
         done
     done
