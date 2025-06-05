@@ -20,6 +20,15 @@ mapfile -t wall  <<< $'     \n     \n     '
 declare -A tiles
 declare -A spikes
 
+# change binds here
+declare -A KEYS=(
+    [h]="left" 
+    [j]="down"
+    [k]="up"
+    [l]="right"
+    [r]="reset"
+    [q]="quit"
+)
 load_map() {
     local map=$1
     [ -f "$map" ] || exit 1
@@ -167,8 +176,8 @@ get_coords() {
     case "$direction" in
         left)   new_x=$((x - 1)); new_y=$y ;;
         right)  new_x=$((x + 1)); new_y=$y ;;
-        top)    new_x=$x; new_y=$((y - 1)) ;;
-        bottom) new_x=$x; new_y=$((y + 1)) ;;
+        up)    new_x=$x; new_y=$((y - 1)) ;;
+        down) new_x=$x; new_y=$((y + 1)) ;;
     esac
 
     echo "$new_x $new_y"
@@ -215,6 +224,24 @@ push() {
     return 0
 }
 
+draw_keybinds() {
+    local left up down right
+    local output
+
+    for key in $(printf "%s\n" "${!KEYS[@]}" | sort -r); do
+        case "${KEYS[$key]}" in
+            "left")  left="${key^^}";;
+            "right") right="${key^^}";;
+            "up")    up="${key^^}";;
+            "down")  down="${key^^}";;
+            *)
+                output+="$RED${key^^}$RESET: ${KEYS[$key]^}, "
+            ;;
+        esac
+    done
+    output="$RED$left$down$up$right$RESET: Movement, $output"
+    printf "\n%s\n" "${output%, }"
+}
 draw_status() {
     tput cup 0 0
     printf "Moves left: %s%02d%s" "$RED" "$moves" "$RESET"
@@ -232,26 +259,25 @@ check_win() {
 
     for pos in "${neighbors[@]}"; do
         if [[ "${tiles["$pos"]}" == 5 ]]; then
-        tput cup $((Y_TILES * TILE_SIZE_Y + BAR_HEIGHT)) 0
-            message="${GREEN}You Won! ${RESET}"
+            tput cup $((Y_TILES * TILE_SIZE_Y + BAR_HEIGHT)) 0
+            printf "%sYou Won!%s\n" "$GREEN" "$RESET"
             exit 0
         fi
     done
 }
 
-message="bye!"
-
 load_map "$1"
 
 clear
 tput civis
-trap 'tput cnorm; tput sgr0; clear; echo -e "$message"; exit' EXIT
+trap 'tput cnorm; tput sgr0; exit' EXIT
 
 draw_grid
 draw_tile "$player_x" "$player_y"
 draw_status
-printf "\n%sHJKL%s/%sWSAD%s: Movement, %sR%s: Reset, %sQ%s: Quit" "$RED" "$RESET" "$RED" "$RESET" "$RED" "$RESET" "$RED" "$RESET"
+draw_keybinds
 
+echo "$player_x, $player_y" >> log 
 # Main Loop
 while :; do
     if (( "$moves" <= 0 )); then 
@@ -262,38 +288,37 @@ while :; do
     fi
     read -rsn1 key
 
-    old_x=$player_x
-    old_y=$player_y
-
-    case "$key" in
-        h|a) new_x=$((player_x - 1)); new_y=$player_y; direction="left" ;;
-        l|d) new_x=$((player_x + 1)); new_y=$player_y; direction="right" ;;
-        k|w) new_x=$player_x; new_y=$((player_y - 1)); direction="top" ;;
-        j|s) new_x=$player_x; new_y=$((player_y + 1)); direction="bottom" ;;
-        r) exec "$0" "$@" ;;
-        q) exit 0 ;;
-        *) continue ;;
+    case "${KEYS[$key]}" in
+        "left"|"down"|"up"|"right") 
+            direction="${KEYS[$key]}"
+            read -r new_x new_y <<<"$(get_coords "$player_x" "$player_y" "$direction")"
+        ;;
+        "reset") exec "$0" "$@" ;;
+        "quit") exit 0 ;;
     esac
 
-    if [[ "${tiles["$new_x,$new_y"]}" == 2 ]]; then
-        push "$new_x" "$new_y" "$direction" "2"
+    tile="${tiles["$new_x,$new_y"]}"
+    case "$tile" in
+        2|3) push "$new_x" "$new_y" "$direction" "$tile" ;;
+        *)
+            if ! is_blocked "$new_x" "$new_y"; then
+                old_x=$player_x
+                old_y=$player_y
+                player_x=$new_x
+                player_y=$new_y
+                draw_tile "$old_x" "$old_y"
+                draw_tile "$player_x" "$player_y"
+            fi
+            ;;
+    esac
 
-    elif [[ "${tiles["$new_x,$new_y"]}" == 3 ]]; then
-        push "$new_x" "$new_y" "$direction" "3"
-
-    elif ! is_blocked "$new_x" "$new_y"; then
-        player_x=$new_x
-        player_y=$new_y
-        draw_tile "$old_x" "$old_y"
-        draw_tile "$player_x" "$player_y"
-    fi
-
-    # Remove move on spike
+    # Move cost
     if [[ "${spikes["$player_x,$player_y"]}" == 1 ]]; then
-        ((moves-=2))
+        ((moves -= 2))
     else
         ((moves--))
     fi
+
     draw_status
     check_win
 done
