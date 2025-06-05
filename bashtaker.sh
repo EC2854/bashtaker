@@ -37,11 +37,12 @@ load_map() {
     local map=$1
     [ -f "$map" ] || exit 1
 
-    moves=$(jq '.moves' "$map")
-    spikes_move=$(jq '.spikes_move' "$map")
-
-    key_x=$(jq '.key_x' "$map")
-    key_y=$(jq '.key_y' "$map")
+    eval "$(jq -r '@sh
+        "moves=\(.moves) 
+        spikes_move=\(.spikes_move) 
+        key_x=\(.key_x) 
+        key_y=\(.key_y)"
+        ' "$map")"
 
     local tile_rows=() spike_rows=()
     local tile_row spike_row
@@ -158,10 +159,6 @@ draw_grid() {
         for ((x = 0; x < X_TILES; x++)); do
             draw_tile "$x" "$y"
         done
-    done
-    for tile in "${!tiles[@]}"; do
-        IFS="," read -r x y <<< "$tile"
-        draw_tile "$x" "$y"
     done
 }
 get_coords() {
