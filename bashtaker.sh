@@ -10,43 +10,67 @@ GREEN=$(tput setaf 2)
 MAGENTA=$(tput setaf 5)
 YELLOW=$(tput setaf 3)
 
-# Grid config
-TILE_SIZE_X=5
-TILE_SIZE_Y=3
+# config
 BAR_HEIGHT=2
+CONFIG_PATHS=("./config.json" "$XDG_CONFIG_HOME/bashtaker/config.json") # Parsed in reverse - last file is the most important
+DEFAULT_CONFIG_URL="https://raw.githubusercontent.com/EC2854/bashtaker/refs/heads/main/config.json"
 
-has_key=0
-
-mapfile -t blank <<< $'╭───╮\n│   │\n╰───╯'
-mapfile -t wall  <<< $'     \n     \n     '
-
+declare -A keys
 declare -A tiles
 declare -A spikes
 
-# change binds here
-declare -A KEYS=(
-    [h]="left" 
-    [j]="down"
-    [k]="up"
-    [l]="right"
-    [r]="reset"
-    [q]="quit"
-)
+has_key=0
+
+parse_config() {
+    local config
+    for config_path in "${CONFIG_PATHS[@]}"; do 
+        [ -f "$config_path" ] && config="$config_path"
+    done
+    if [ -z "$config" ];then 
+        printf "No config file found. \nCopying from github repo into ${CONFIG_PATHS[0]} " 
+        curl "$DEFAULT_CONFIG_URL" > "${CONFIG_PATHS[0]}"
+    fi
+
+    mapfile -t tile_sprite < <(jq -r '.tile[]' "$config")
+    TILE_SIZE_X=${#tile_sprite[0]}
+    TILE_SIZE_Y=${#tile_sprite[@]}
+
+    SPIKE_SPRITE_POSITIONS=()
+    for y in "${!tile_sprite[@]}"; do
+        for ((x=0; x<$TILE_SIZE_X; x++)); do
+            if [[ "${tile_sprite[y]:$x:1}" == "x" ]]; then
+                CHAR_X="$x"
+                CHAR_Y="$y"
+                tile_sprite[y]="${tile_sprite[y]/x/ }"
+            elif [[  "${tile_sprite[y]:$x:1}" == "s"  ]]; then 
+                SPIKE_SPRITE_POSITIONS+=("$x,$y")
+                tile_sprite[y]="${tile_sprite[y]/s/ }"
+            fi
+        done
+    done
+
+    # Make binds array from config file
+    eval "$(jq -r '
+      .keys | to_entries | 
+      map("[\(.value|@sh)]=\(.key|@sh)") | 
+      ["keys=("] + . + [")"] | 
+      .[]' "$config"
+    )"
+}
 
 load_map() {
     local map=$1
-    [ -f "$map" ] || exit 1
+    [ -f "$map" ] || {
+        printf "%sNo map file!\nexiting...\n%s" "$RED" "$RESET"
+        exit 1
+    }
 
-    eval "$(jq -r '@sh
-        "moves=\(.moves) 
-        spikes_move=\(.spikes_move) 
-        key_x=\(.key_x) 
-        key_y=\(.key_y)"
-        ' "$map")"
+    for var in moves spikes_move key_x key_y; do 
+        eval $var=$(jq -r ".$var" "$map")
+    done 
 
     local tile_rows=() spike_rows=()
     local tile_row spike_row
-    local char
 
     mapfile -t tile_rows < <(jq -r '.tiles[]' "$map")
     mapfile -t spike_rows < <(jq -r '.spikes[]' "$map")
@@ -54,6 +78,7 @@ load_map() {
     X_TILES=${#tile_rows[0]}
     Y_TILES=${#tile_rows[@]}
 
+    local char
     for (( y=0; y<Y_TILES; y++ )); do
         tile_row=${tile_rows[$y]}
         spike_row=${spike_rows[$y]}
@@ -135,22 +160,28 @@ draw_tile() {
     local row col
     read -r row col <<<"$(get_screen_position "$x" "$y")"
 
-    local tile=("${blank[@]}")
-    [[ $type == 1 ]] && tile=("${wall[@]}")
+    local tile=("${tile_sprite[@]}")
+    [[ $type == 1 ]] && return 0 # dont draw empty tile
 
+    # Draw Blank tile
     for ((i = 0; i < TILE_SIZE_Y; i++)); do
         tput cup $((row + i)) "$col"
         line="${tile[i]:0:TILE_SIZE_X}"
-        if [[ $i == 1 ]]; then
-            printf "%s%s" "$color" "${line:0:1}"
-            printf "%s%s" "$spike_color" "$spike"
-            printf "%s%s" "$color" "$char"
-            printf "%s%s" "$spike_color" "$spike"
-            printf "%s%s%s" "$color" "${line:4:1}" "$RESET"
-        else
-            printf "%s%s%s" "$color" "$line" "$RESET"
-        fi
+        printf "%s%s%s" "$color" "$line" "$RESET"
     done
+
+    # Draw char
+    tput cup $((row + CHAR_Y )) $(( col + CHAR_X ))
+    printf "%s%s%s" "$color" "$char" "$RESET"
+
+    # Draw Spikes
+    for spike_coords in "${SPIKE_SPRITE_POSITIONS[@]}";do 
+        local x y
+        IFS="," read -r x y <<< "$spike_coords"
+        tput cup $((row + y )) $(( col + x ))
+        printf "%s%s%s" "$spike_color" "$spike" "$RESET"
+    done
+
 }
 draw_grid() {
     clear
@@ -246,14 +277,14 @@ draw_keybinds() {
     local left up down right
     local output
 
-    for key in $(printf "%s\n" "${!KEYS[@]}" | sort -r); do
-        case "${KEYS[$key]}" in
+    for key in $(printf "%s\n" "${!keys[@]}" | sort -r); do
+        case "${keys[$key]}" in
             "left")  left="${key^^}";;
             "right") right="${key^^}";;
             "up")    up="${key^^}";;
             "down")  down="${key^^}";;
             *)
-                output+="$RED${key^^}$RESET: ${KEYS[$key]^}, "
+                output+="$RED${key^^}$RESET: ${keys[$key]^}, "
             ;;
         esac
     done
@@ -293,8 +324,7 @@ switch_spikes() {
     fi
     local x y
     for spike in "${!spikes[@]}"; do
-        spikes["$spike"]=$(( spikes["$spike"] - 1)) 
-        spikes["$spike"]=${spikes["$spike"]//-} # make value abs
+        spikes["$spike"]=$(( 1 - spikes["$spike"])) 
         [[ ${spikes["$spike"]} == 1 && ${tiles["$spike"]} == 3 ]] && tiles["$spike"]=0 # Remove skeleton
         IFS="," read -r x y <<<"$spike"
         draw_tile "$x" "$y"
@@ -307,9 +337,11 @@ clear
 tput civis
 trap 'tput cnorm; tput sgr0; exit' EXIT
 
-draw_grid
-draw_status
-draw_keybinds
+parse_config
+draw_grid &
+draw_status &
+draw_keybinds &
+wait 
 
 # Main Loop
 while :; do
@@ -323,9 +355,9 @@ while :; do
     read -rsn1 key
 
     switch_spikes
-    case "${KEYS[$key]}" in
+    case "${keys[$key]}" in
         "left"|"down"|"up"|"right") 
-            direction="${KEYS[$key]}"
+            direction="${keys[$key]}"
             read -r new_x new_y <<<"$(get_coords "$player_x" "$player_y" "$direction")"
         ;;
         "reset") exec "$0" "$@" ;;
