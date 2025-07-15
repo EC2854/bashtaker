@@ -27,8 +27,10 @@ parse_config() {
         [ -f "$config_path" ] && config="$config_path"
     done
     if [ -z "$config" ];then 
-        printf "No config file found. \nCopying from github repo into ${CONFIG_PATHS[0]} " 
+        printf "%sNo config file found. \nCopying from github repo into %s%s\n" "$YELLOW" "${CONFIG_PATHS[0]}" "$RESET"
         curl "$DEFAULT_CONFIG_URL" > "${CONFIG_PATHS[0]}"
+        printf "%sCheck downloaded file(%s) and run this script again\n%s" "$YELLOW" "${CONFIG_PATHS[0]}" "$RESET"
+        exit 1
     fi
 
     mapfile -t tile_sprite < <(jq -r '.tile[]' "$config")
