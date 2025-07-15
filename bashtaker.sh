@@ -18,6 +18,7 @@ DEFAULT_CONFIG_URL="https://raw.githubusercontent.com/EC2854/bashtaker/refs/head
 declare -A keys
 declare -A tiles
 declare -A spikes
+declare -A sprites
 
 has_key=0
 
@@ -58,6 +59,11 @@ parse_config() {
       ["keys=("] + . + [")"] | 
       .[]' "$config"
     )"
+    eval "$(jq -r '
+      .sprites | to_entries | 
+      map("sprites[\(.key|@sh)]=\(.value|@sh)") | 
+      .[]' "$config"
+    )"
 }
 
 load_map() {
@@ -87,14 +93,15 @@ load_map() {
         for (( x=0; x<X_TILES; x++ )); do
             char=${tile_row:$x:1}
             if [[ "$char" != "_" ]]; then
-                if [[ "$char" == "p" ]]; then
-                    player_x=$x
-                    player_y=$y
-                else
-                    tiles["$x,$y"]=$char
-                fi
+                case "$char" in
+                    "p") player_x="$x"; player_y="$y";;
+                    " ") tiles["$x,$y"]="wall";;
+                    "r") tiles["$x,$y"]="rock";;
+                    "s") tiles["$x,$y"]="skeleton";;
+                    "l") tiles["$x,$y"]="lock";;
+                    "g") tiles["$x,$y"]="girl";;
+                esac
             fi
-
             char=${spike_row:$x:1}
             if [[ "$char" != "_" ]]; then
                 spikes["$x,$y"]=$char
@@ -115,20 +122,19 @@ get_tile_info() {
     local type=${tiles["$x,$y"]}
     local color char
     if [[ "$player_x" == "$x" && "$player_y" == "$y" ]];then 
-        char=""
+        char="${sprites["player"]}"
         color="$RED"
     else
         case "$type" in
-            1) char=" "; color="$BLACK"   ;; # Wall
-            2) char=""; color="$WHITE"   ;; # Rock
-            3) char=""; color="$WHITE"   ;; # Skeleton
-            4) char="󰌾"; color="$YELLOW"  ;; # Lock
-            5) char="󰋑"; color="$MAGENTA" ;; # Girl
-            *) char=" "; color="$BLACK"   ;;
+            "rock") char="${sprites["rock"]}"; color="$WHITE";;
+            "skeleton") char="${sprites["skeleton"]}"; color="$WHITE";;
+            "lock") char="${sprites["lock"]}"; color="$YELLOW";;
+            "girl") char="${sprites["girl"]}"; color="$MAGENTA";;
+            *) char=" "; color="$BLACK";;
         esac
     fi
     if [[ "$key_x" == "$x" && "$key_y" == "$y" ]];then 
-        [[ "$char" == " " ]] && char="󰌆"
+        [[ "$char" == " " ]] && char="${sprites["key"]}"
         color="$YELLOW"
     fi
     echo "$char,$color,$type"
@@ -140,7 +146,7 @@ get_spike_info() {
     spike_color="$BLACK"
 
     if [[ ${spikes["$x,$y"]} ]];then 
-        spike=""
+        spike="${sprites["spike"]}"
         if [[ ${spikes["$x,$y"]} == 1 ]]; then
             spike_color="$WHITE"
         else
@@ -163,7 +169,7 @@ draw_tile() {
     read -r row col <<<"$(get_screen_position "$x" "$y")"
 
     local tile=("${tile_sprite[@]}")
-    [[ $type == 1 ]] && return 0 # dont draw empty tile
+    [[ $type == "wall" ]] && return 0 # dont draw empty tile
 
     # Draw Blank tile
     for ((i = 0; i < TILE_SIZE_Y; i++)); do
@@ -220,8 +226,8 @@ is_blocked() {
 
     # blocked by wall or rock
     case "${tiles["$x,$y"]}" in
-        1|2) return 0 ;;
-        4) 
+        "wall"|"rock") return 0 ;;
+        "lock") 
             if [[ "$has_key" == 1 ]]; then
                 tiles["$x,$y"]=0
                 return 1
@@ -242,7 +248,7 @@ can_push() {
     read -r new_x new_y <<<"$(get_coords "$x" "$y" "$direction")"
 
     (( new_x < 0 || new_x >= X_TILES || new_y < 0 || new_y >= Y_TILES )) && return 1
-    [[ "${tiles["$new_x,$new_y"]}" != 0 && -n "${tiles["$new_x,$new_y"]}" ]] && return 1
+    [[ -n "${tiles["$new_x,$new_y"]}" ]] && return 1
     return 0
 }
 push() {
@@ -252,9 +258,9 @@ push() {
     local type=$4
 
     if ! can_push "$x" "$y" "$direction"; then
-        [[ "$type" == 2 ]] && return 1
-        [[ "$type" == 3 ]] && {
-            tiles["$x,$y"]="0"
+        [[ "$type" == "rock" ]] && return 1
+        [[ "$type" == "skeleton" ]] && {
+            unset tiles["$x,$y"]
             draw_tile "$x" "$y"
             return 0
         }
@@ -263,9 +269,9 @@ push() {
     local new_x new_y
     read -r new_x new_y <<<"$(get_coords "$x" "$y" "$direction")"
 
-    tiles["$x,$y"]="0"
+    unset tiles["$x,$y"]
     draw_tile "$x" "$y"
-    if ! [[ $type == 3 && ${spikes["$new_x,$new_y"]} == 1 ]];then 
+    if ! [[ $type == "skeleton" && ${spikes["$new_x,$new_y"]} == 1 ]];then 
         tiles["$new_x,$new_y"]="$type"
         draw_tile "$new_x" "$new_y"
     fi
@@ -305,7 +311,7 @@ check_win() {
     )
 
     for pos in "${neighbors[@]}"; do
-        if [[ "${tiles["$pos"]}" == 5 ]]; then
+        if [[ "${tiles["$pos"]}" == "girl" ]]; then
             tput cup $((Y_TILES * TILE_SIZE_Y + BAR_HEIGHT)) 0
             printf "%sYou Won!%s\n" "$GREEN" "$RESET"
             exit 0
@@ -327,7 +333,7 @@ switch_spikes() {
     local x y
     for spike in "${!spikes[@]}"; do
         spikes["$spike"]=$(( 1 - spikes["$spike"])) 
-        [[ ${spikes["$spike"]} == 1 && ${tiles["$spike"]} == 3 ]] && tiles["$spike"]=0 # Remove skeleton
+        [[ ${spikes["$spike"]} == 1 && ${tiles["$spike"]} == "skeleton" ]] && tiles["$spike"]=0 # Remove skeleton
         IFS="," read -r x y <<<"$spike"
         draw_tile "$x" "$y"
     done
@@ -369,7 +375,7 @@ while :; do
 
     tile="${tiles["$new_x,$new_y"]}"
     case "$tile" in
-        2|3) push "$new_x" "$new_y" "$direction" "$tile" ;;
+        "rock"|"skeleton") push "$new_x" "$new_y" "$direction" "$tile" ;;
         *)
             if ! is_blocked "$new_x" "$new_y"; then
                 old_x=$player_x

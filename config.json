@@ -7,6 +7,15 @@
         "reset":"r",
         "quit": "q"
     },
+    "sprites": {
+        "player":   "",
+        "rock":     "",
+        "skeleton": "",
+        "lock":     "󰌾",
+        "girl":     "󰋑",
+        "key":      "󰌆",
+        "spike":    ""
+    },
     "tile": [
         "╭───╮",
         "│sxs│",
