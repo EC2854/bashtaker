@@ -40,7 +40,7 @@ parse_config() {
 
     SPIKE_SPRITE_POSITIONS=()
     for y in "${!tile_sprite[@]}"; do
-        for ((x=0; x<$TILE_SIZE_X; x++)); do
+        for ((x=0; x<TILE_SIZE_X; x++)); do
             if [[ "${tile_sprite[y]:$x:1}" == "x" ]]; then
                 CHAR_X="$x"
                 CHAR_Y="$y"
@@ -74,7 +74,7 @@ load_map() {
     }
 
     for var in moves spikes_move key_x key_y; do 
-        eval $var=$(jq -r ".$var" "$map")
+        eval $var="$(jq -r ".$var" "$map")"
     done 
 
     local tile_rows=() spike_rows=()
@@ -260,7 +260,7 @@ push() {
     if ! can_push "$x" "$y" "$direction"; then
         [[ "$type" == "rock" ]] && return 1
         [[ "$type" == "skeleton" ]] && {
-            unset tiles["$x,$y"]
+            unset "tiles[\"$x,$y\"]"
             draw_tile "$x" "$y"
             return 0
         }
@@ -269,7 +269,7 @@ push() {
     local new_x new_y
     read -r new_x new_y <<<"$(get_coords "$x" "$y" "$direction")"
 
-    unset tiles["$x,$y"]
+    unset "tiles[\"$x,$y\"]"
     draw_tile "$x" "$y"
     if ! [[ $type == "skeleton" && ${spikes["$new_x,$new_y"]} == 1 ]];then 
         tiles["$new_x,$new_y"]="$type"
@@ -370,7 +370,7 @@ while :; do
         ;;
         "reset") exec "$0" "$@" ;;
         "quit") exit 0 ;;
-        *) continue ;;
+        *) break ;;
     esac
 
     tile="${tiles["$new_x,$new_y"]}"
