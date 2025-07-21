@@ -1,38 +1,60 @@
 #!/usr/bin/env bash
 
-RESET=$(tput sgr0)
-
-# Colors
-BLACK=$(tput setaf 0)
-WHITE=$(tput setaf 7)
-RED=$(tput setaf 1)
-GREEN=$(tput setaf 2)
-MAGENTA=$(tput setaf 5)
-YELLOW=$(tput setaf 3)
-
-# config
-BAR_HEIGHT=2
-CONFIG_PATHS=("./config.json" "$XDG_CONFIG_HOME/bashtaker/config.json") # Parsed in reverse - last file is the most important
-DEFAULT_CONFIG_URL="https://raw.githubusercontent.com/EC2854/bashtaker/refs/heads/main/config.json"
+. "./assets/vars.sh"
 
 declare -A keys
 declare -A tiles
 declare -A spikes
 declare -A sprites
+declare -A font
 
-has_key=0
 
-parse_config() {
-    local config
-    for config_path in "${CONFIG_PATHS[@]}"; do 
-        [ -f "$config_path" ] && config="$config_path"
+redraw() {
+    width=$(tput cols)
+    height=$(tput lines)
+
+    map_width=$((X_TILES * TILE_SIZE_X))
+    map_height=$((Y_TILES * TILE_SIZE_Y))
+
+    if [[ $width -lt $map_width  || height -lt $map_height ]]; then
+        clear
+        printf "%s\n%s\n" "Terminal window is too small!" "please resize it and press anything. "
+        read -rsn1
+        redraw
+        return
+    fi
+
+    margin_x=$(((width - map_width)/2))
+    margin_y=$(((height - map_height)/2))
+
+
+    draw_grid
+    draw_status
+    draw_keybinds
+}
+check_file() {
+    local last_id
+    local file
+
+    local paths=("$@")
+    ((last_id=${#paths[@]} - 1))
+    local url=${paths[last_id]}
+    unset "paths[last_id]"
+
+    for path in "${paths[@]}"; do 
+        [ -f "$path" ] && file="$path"
     done
-    if [ -z "$config" ];then 
-        printf "%sNo config file found. \nCopying from github repo into %s%s\n" "$YELLOW" "${CONFIG_PATHS[0]}" "$RESET"
-        curl "$DEFAULT_CONFIG_URL" > "${CONFIG_PATHS[0]}"
-        printf "%sCheck downloaded file(%s) and run this script again\n%s" "$YELLOW" "${CONFIG_PATHS[0]}" "$RESET"
+    if [ -z "$file" ];then 
+        printf "%sNo config file found. \nCopying from github repo into %s%s\n" "$YELLOW" "${paths[0]}" "$RESET"
+        curl "$url" -o "${paths[0]}"
+        printf "%sCHECK DOWNLOADED FILE%s(%s) and run this script again\n%s" "$RED" "$YELLOW" "${paths[0]}" "$RESET"
         exit 1
     fi
+    echo "$file"
+}
+
+parse_config() {
+    local config=$(check_file "${CONFIG_PATHS[@]}" "$DEFAULT_CONFIG_URL")
 
     mapfile -t tile_sprite < <(jq -r '.tile[]' "$config")
     TILE_SIZE_X=${#tile_sprite[0]}
@@ -64,13 +86,28 @@ parse_config() {
       map("sprites[\(.key|@sh)]=\(.value|@sh)") | 
       .[]' "$config"
     )"
+
+    default_map=$(jq -r '.default_map' "$config")
+
+    font_width=$(jq -r '.font_width' "$config")
+    font_height=$(jq -r '.font_height' "$config")
+
+    parse_font
+}
+parse_font() {
+    local font_file=$(check_file "${FONT_PATHS[@]}" "$DEFAULT_FONT_URL")
+
+    for char in $(jq -r 'keys[]' "$font_file"); do 
+        font["$char"]=$(jq -r --arg char "$char" '.[$char][]' "$font_file")
+        font["$char"]="${font["$char"]//$'\n'/}" # clean all new lines
+    done
 }
 
 load_map() {
     local map=$1
     [ -f "$map" ] || {
-        printf "%sNo map file!\nexiting...\n%s" "$RED" "$RESET"
-        exit 1
+        [ -z "$default_map" ] && exit 1
+        map="$default_map"
     }
 
     for var in moves spikes_move key_x key_y; do 
@@ -85,6 +122,9 @@ load_map() {
 
     X_TILES=${#tile_rows[0]}
     Y_TILES=${#tile_rows[@]}
+
+    MAP_NAME=$(jq -r '.name' "$map")
+
 
     local char
     for (( y=0; y<Y_TILES; y++ )); do
@@ -112,8 +152,8 @@ load_map() {
 get_screen_position() {
     local x=$1
     local y=$2
-    row=$((BAR_HEIGHT + y * TILE_SIZE_Y))
-    col=$((x * TILE_SIZE_X))
+    local row=$((y * TILE_SIZE_Y + margin_y))
+    local col=$((x * TILE_SIZE_X + margin_x))
     echo "$row $col"
 }
 get_tile_info() {
@@ -126,11 +166,11 @@ get_tile_info() {
         color="$RED"
     else
         case "$type" in
-            "rock") char="${sprites["rock"]}"; color="$WHITE";;
+            "rock")     char="${sprites["rock"]}";     color="$WHITE";;
             "skeleton") char="${sprites["skeleton"]}"; color="$WHITE";;
-            "lock") char="${sprites["lock"]}"; color="$YELLOW";;
-            "girl") char="${sprites["girl"]}"; color="$MAGENTA";;
-            *) char=" "; color="$BLACK";;
+            "lock")     char="${sprites["lock"]}";     color="$YELLOW";;
+            "girl")     char="${sprites["girl"]}";     color="$MAGENTA";;
+            *)          char=" ";                      color="$BLACK";;
         esac
     fi
     if [[ "$key_x" == "$x" && "$key_y" == "$y" ]];then 
@@ -172,6 +212,7 @@ draw_tile() {
     [[ $type == "wall" ]] && return 0 # dont draw empty tile
 
     # Draw Blank tile
+    local i
     for ((i = 0; i < TILE_SIZE_Y; i++)); do
         tput cup $((row + i)) "$col"
         line="${tile[i]:0:TILE_SIZE_X}"
@@ -278,26 +319,55 @@ push() {
     return 0
 }
 draw_status() {
-    tput cup 0 0
-    printf "Moves left: %s%02d%s" "$RED" "$moves" "$RESET"
+    draw_string "$((moves / 10))$((moves % 10))" "$((height - font_height - 1))" 1 "$RED"
+    draw_string "$MAP_NAME" "$((height - font_height - 1))" $((width - font_width * ${#MAP_NAME} - 1)) "$RED"
 }
+draw_string() {
+    local string=$1
+    local height=$2
+    local width=$3
+    local color=$4
+    local i
+    for (( i = 0; i < ${#string}; i++ )); do
+        draw_char "${string:i:1}" "$height" "$((width + i * font_width))" "$color"
+    done
+}
+draw_char() {
+    local char=${font["$1"]}
+    local height=$2
+    local width=$3
+    local color=$4
+
+    [ -z "$height" ] && height=0
+    [ -z "$width" ] && width=0
+    [ -z "$color" ] && color="$WHITE"
+
+    local i
+    for ((i = 0; i < font_height; i++)); do
+        tput cup "$((height + i))" "$width"
+        line="${char:$((i * font_width)):font_width}"
+        printf "%s%s%s" "$color" "$line" "$RESET"
+    done 
+}
+
 draw_keybinds() {
     local left up down right
     local output
 
     for key in $(printf "%s\n" "${!keys[@]}" | sort -r); do
         case "${keys[$key]}" in
-            "left")  left="${key^^}";;
-            "right") right="${key^^}";;
-            "up")    up="${key^^}";;
-            "down")  down="${key^^}";;
+            "left")  left="${key}";;
+            "right") right="${key}";;
+            "up")    up="${key}";;
+            "down")  down="${key}";;
             *)
-                output+="$RED${key^^}$RESET: ${keys[$key]^}, "
+                output+="$RED${key}$RESET: ${keys[$key]^}, "
             ;;
         esac
     done
     output="$RED$left$down$up$right$RESET: Movement, $output"
-    printf "\n%s\n" "${output%, }"
+    tput cup $((height - 2)) $(( (width - ${#output} / 2) / 2 )) 
+    printf "%s" "${output%, }"
 }
 check_win() {
     local x=$player_x
@@ -312,7 +382,7 @@ check_win() {
 
     for pos in "${neighbors[@]}"; do
         if [[ "${tiles["$pos"]}" == "girl" ]]; then
-            tput cup $((Y_TILES * TILE_SIZE_Y + BAR_HEIGHT)) 0
+            tput cup $((Y_TILES * TILE_SIZE_Y)) 0
             printf "%sYou Won!%s\n" "$GREEN" "$RESET"
             exit 0
         fi
@@ -338,46 +408,20 @@ switch_spikes() {
         draw_tile "$x" "$y"
     done
 }
-
-load_map "$1"
-
-clear
-tput civis
-trap 'tput cnorm; tput sgr0; exit' EXIT
-
-parse_config
-draw_grid &
-draw_status &
-draw_keybinds &
-wait 
-
-# Main Loop
-while :; do
-    if (( "$moves" <= 0 )); then 
-        tput cup $((Y_TILES * TILE_SIZE_Y + BAR_HEIGHT)) 0
-        printf "%sOut of moves! Restarting...%s" "$RED" "$RESET"
-        sleep 1
-        exec "$0" "$@"
-    fi
-
-    read -rsn1 key
-
-    switch_spikes
-    case "${keys[$key]}" in
-        "left"|"down"|"up"|"right") 
-            direction="${keys[$key]}"
-            read -r new_x new_y <<<"$(get_coords "$player_x" "$player_y" "$direction")"
-        ;;
-        "reset") exec "$0" "$@" ;;
-        "quit") exit 0 ;;
-        *) break ;;
-    esac
-
+move() {
+    local direction="$1"
+    read -r new_x new_y <<<"$(get_coords "$player_x" "$player_y" "$direction")"
     tile="${tiles["$new_x,$new_y"]}"
+
     case "$tile" in
-        "rock"|"skeleton") push "$new_x" "$new_y" "$direction" "$tile" ;;
+        "rock"|"skeleton") 
+            switch_spikes 
+            push "$new_x" "$new_y" "$direction" "$tile" 
+        ;;
         *)
             if ! is_blocked "$new_x" "$new_y"; then
+                switch_spikes # i know that calling this twice is stupid but its the easiest
+
                 old_x=$player_x
                 old_y=$player_y
                 player_x=$new_x
@@ -386,11 +430,11 @@ while :; do
                 check_key "$player_x" "$player_y"
                 draw_tile "$old_x" "$old_y"
                 draw_tile "$player_x" "$player_y"
+            else
+                return
             fi
-            ;;
+        ;;
     esac
-
-    # Move cost
     if [[ "${spikes["$player_x,$player_y"]}" == 1 ]]; then
         ((moves -= 2))
     else
@@ -399,4 +443,36 @@ while :; do
 
     draw_status
     check_win
+}
+
+parse_config
+load_map "$1"
+
+tput civis
+
+trap 'tput cnorm; tput sgr0; exit' EXIT
+# trap 'redraw' WINCH # doesnt work when blocked by another process so its shitty af
+
+redraw
+
+# Main Loop
+while :; do
+    if (( "$moves" <= 0 )); then 
+        tput cup $((Y_TILES * TILE_SIZE_Y)) 0
+        printf "%sOut of moves! Restarting...%s" "$RED" "$RESET"
+        sleep 1
+        exec "$0" "$@"
+    fi
+
+    read -rsn1 key
+
+    [[ "${#key}" == 1 ]] || continue # temporary fix for special characters (TODO)
+    
+    case "${keys[$key]}" in
+        "left"|"down"|"up"|"right") move "${keys[$key]}";;
+        "redraw") redraw;;
+        "reset") exec "$0" "$@" ;;
+        "quit") exit 0 ;;
+        *) continue ;;
+    esac
 done

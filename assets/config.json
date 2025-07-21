@@ -1,11 +1,12 @@
 {
     "keys": {
-        "left": "h",
-        "down": "j",
-        "up":   "k",
-        "right":"l",
-        "reset":"r",
-        "quit": "q"
+        "left":  "h",
+        "down":  "j",
+        "up":    "k",
+        "right": "l",
+        "reset": "r",
+        "redraw":"R",
+        "quit":  "q"
     },
     "sprites": {
         "player":   "",
@@ -20,5 +21,8 @@
         "╭───╮",
         "│sxs│",
         "╰───╯"
-    ]
+    ],
+    "default_map":"./assets/maps/1.json",
+    "font_width": 8,
+    "font_height":5
 }

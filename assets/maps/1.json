@@ -1,6 +1,8 @@
 {
+    "name": "I",
     "moves": 23,
     "spikes_move": 0,
+    "on_win":"./cutscenes/1.json",
     "tiles": [
         "    _p ",
         " __s__ ",
