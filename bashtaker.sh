@@ -458,7 +458,7 @@ redraw
 # Main Loop
 while :; do
     if (( "$moves" <= 0 )); then 
-        tput cup $((Y_TILES * TILE_SIZE_Y)) 0
+        tput cup $((map_height + margin_y)) $(((map_width)/2 + margin_x - 14))
         printf "%sOut of moves! Restarting...%s" "$RED" "$RESET"
         sleep 1
         exec "$0" "$@"
