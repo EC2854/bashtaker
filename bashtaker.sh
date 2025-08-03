@@ -8,21 +8,18 @@ declare -A spikes
 declare -A sprites
 declare -A font
 
-
 redraw() {
-    width=$(tput cols)
-    height=$(tput lines)
+    read -r height width < <(stty size)
 
     map_width=$((X_TILES * TILE_SIZE_X))
     map_height=$((Y_TILES * TILE_SIZE_Y))
 
-    if [[ $width -lt $map_width  || height -lt $map_height ]]; then
+    while [[ $width -lt $map_width  || $height -lt $map_height ]]; do
         clear
         printf "%s\n%s\n" "Terminal window is too small!" "please resize it and press anything. "
         read -rsn1
-        redraw
-        return
-    fi
+        read -r height width < <(stty size)
+    done
 
     margin_x=$(((width - map_width)/2))
     margin_y=$(((height - map_height)/2))
@@ -45,7 +42,7 @@ check_file() {
         [ -f "$path" ] && file="$path"
     done
     if [ -z "$file" ];then 
-        printf "%sNo config file found. \nCopying from github repo into %s%s\n" "$YELLOW" "${paths[0]}" "$RESET"
+        printf "%sNo config file found. \nCopying from github repo into %s\n" "$YELLOW" "${paths[0]}$RESET"
         curl "$url" -o "${paths[0]}"
         printf "%sCHECK DOWNLOADED FILE%s(%s) and run this script again\n%s" "$RED" "$YELLOW" "${paths[0]}" "$RESET"
         exit 1
@@ -54,7 +51,8 @@ check_file() {
 }
 
 parse_config() {
-    local config=$(check_file "${CONFIG_PATHS[@]}" "$DEFAULT_CONFIG_URL")
+    local config
+    config=$(check_file "${CONFIG_PATHS[@]}" "$DEFAULT_CONFIG_URL")
 
     mapfile -t tile_sprite < <(jq -r '.tile[]' "$config")
     TILE_SIZE_X=${#tile_sprite[0]}
@@ -95,7 +93,8 @@ parse_config() {
     parse_font
 }
 parse_font() {
-    local font_file=$(check_file "${FONT_PATHS[@]}" "$DEFAULT_FONT_URL")
+    local font_file
+    font_file=$(check_file "${FONT_PATHS[@]}" "$DEFAULT_FONT_URL")
 
     for char in $(jq -r 'keys[]' "$font_file"); do 
         font["$char"]=$(jq -r --arg char "$char" '.[$char][]' "$font_file")
@@ -214,21 +213,18 @@ draw_tile() {
     # Draw Blank tile
     local i
     for ((i = 0; i < TILE_SIZE_Y; i++)); do
-        tput cup $((row + i)) "$col"
         line="${tile[i]:0:TILE_SIZE_X}"
-        printf "%s%s%s" "$color" "$line" "$RESET"
+        printf "\033[%d;%dH%s" $((row + i)) "$col"  "$color$line$RESET"
     done
 
     # Draw char
-    tput cup $((row + CHAR_Y )) $(( col + CHAR_X ))
-    printf "%s%s%s" "$color" "$char" "$RESET"
+    printf "\033[%d;%dH%s" $((row + CHAR_Y )) $(( col + CHAR_X )) "$color$char$RESET"
 
     # Draw Spikes
     for spike_coords in "${SPIKE_SPRITE_POSITIONS[@]}";do 
         local x y
         IFS="," read -r x y <<< "$spike_coords"
-        tput cup $((row + y )) $(( col + x ))
-        printf "%s%s%s" "$spike_color" "$spike" "$RESET"
+        printf "\033[%d;%dH%s" $((row + y )) $(( col + x )) "$spike_color$spike$RESET"
     done
 
 }
@@ -344,9 +340,8 @@ draw_char() {
 
     local i
     for ((i = 0; i < font_height; i++)); do
-        tput cup "$((height + i))" "$width"
         line="${char:$((i * font_width)):font_width}"
-        printf "%s%s%s" "$color" "$line" "$RESET"
+        printf "\033[%d;%dH%s" "$((height + i))" "$width"  "$color$line$RESET"
     done 
 }
 
@@ -366,7 +361,7 @@ draw_keybinds() {
         esac
     done
     output="$RED$left$down$up$right$RESET: Movement, $output"
-    tput cup $((height - 2)) $(( (width - ${#output} / 2) / 2 )) 
+    printf "\033[%d;%dH" $((height - 2)) $(( (width - ${#output} / 2) / 2 )) 
     printf "%s" "${output%, }"
 }
 check_win() {
@@ -382,7 +377,7 @@ check_win() {
 
     for pos in "${neighbors[@]}"; do
         if [[ "${tiles["$pos"]}" == "girl" ]]; then
-            tput cup $((Y_TILES * TILE_SIZE_Y)) 0
+            printf "\033[%d;%dH" $((Y_TILES * TILE_SIZE_Y)) 0
             printf "%sYou Won!%s\n" "$GREEN" "$RESET"
             exit 0
         fi
@@ -448,9 +443,9 @@ move() {
 parse_config
 load_map "$1"
 
-tput civis
+printf "%s" "$HIDE_CURSOR"
 
-trap 'tput cnorm; tput sgr0; exit' EXIT
+trap 'printf "%s%s" "$SHOW_CURSOR" "$RESET"; exit' EXIT
 # trap 'redraw' WINCH # doesnt work when blocked by another process so its shitty af
 
 redraw
@@ -458,7 +453,7 @@ redraw
 # Main Loop
 while :; do
     if (( "$moves" <= 0 )); then 
-        tput cup $((map_height + margin_y)) $(((map_width)/2 + margin_x - 14))
+        printf "\033[%d;%dH" $((map_height + margin_y)) $(((map_width)/2 + margin_x - 14))
         printf "%sOut of moves! Restarting...%s" "$RED" "$RESET"
         sleep 1
         exec "$0" "$@"
@@ -472,7 +467,7 @@ while :; do
         "left"|"down"|"up"|"right") move "${keys[$key]}";;
         "redraw") redraw;;
         "reset") exec "$0" "$@" ;;
-        "quit") exit 0 ;;
+        "quit") exit ;;
         *) continue ;;
     esac
 done

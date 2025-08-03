@@ -1,13 +1,19 @@
-export RESET=$(tput sgr0)
 
 # Colors
-export BLACK=$(tput setaf 0)
-export WHITE=$(tput setaf 7)
-export RED=$(tput setaf 1)
-export GREEN=$(tput setaf 2)
-export MAGENTA=$(tput setaf 5)
-export YELLOW=$(tput setaf 3)
+export BLACK=$'\e[30m'
+export RED=$'\e[31m'
+export GREEN=$'\e[32m'
+export YELLOW=$'\e[33m'
+export MAGENTA=$'\e[35m'
+export WHITE=$'\e[37m'
 
+export RESET=$'\e[0m'
+
+# cursor stuff
+export HIDE_CURSOR=$'\e[?25l'
+export SHOW_CURSOR=$'\e[?25h'
+
+# Paths 
 export CONFIG_PATHS=("./assets/config.json" "$XDG_CONFIG_HOME/bashtaker/config.json")
 export DEFAULT_CONFIG_URL="https://raw.githubusercontent.com/EC2854/bashtaker/refs/heads/main/assets/config.json"
 
