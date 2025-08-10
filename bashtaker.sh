@@ -9,25 +9,30 @@ declare -A sprites
 declare -A font
 
 redraw() {
-    read -r height width < <(stty size)
+    while :;do 
+        shopt -s checkwinsize; (:;:)
+        if [[ $COLUMNS -lt $map_width  || $LINES -lt $map_height ]]; then 
+            printf '\e[2J'
+            printf "%s\n%s\n" "Terminal window is too small!" "please resize it and press anything. "
+            read -rsn1
+        else
+            break
+        fi
+    done
 
     map_width=$((X_TILES * TILE_SIZE_X))
     map_height=$((Y_TILES * TILE_SIZE_Y))
 
-    while [[ $width -lt $map_width  || $height -lt $map_height ]]; do
-        clear
-        printf "%s\n%s\n" "Terminal window is too small!" "please resize it and press anything. "
-        read -rsn1
-        read -r height width < <(stty size)
-    done
-
-    margin_x=$(((width - map_width)/2))
-    margin_y=$(((height - map_height)/2))
-
+    margin_x=$(((COLUMNS - map_width)/2))
+    margin_y=$(((LINES - map_height)/2))
 
     draw_grid
     draw_status
     draw_keybinds
+}
+clean() {
+    printf "%s%s" "$SHOW_CURSOR" "$RESET"
+    stty echo icanon
 }
 check_file() {
     local last_id
@@ -229,7 +234,7 @@ draw_tile() {
 
 }
 draw_grid() {
-    clear
+    printf '\e[2J'
     local x y
     for ((y = 0; y < Y_TILES; y++)); do
         for ((x = 0; x < X_TILES; x++)); do
@@ -315,8 +320,8 @@ push() {
     return 0
 }
 draw_status() {
-    draw_string "$((moves / 10))$((moves % 10))" "$((height - font_height - 1))" 1 "$RED"
-    draw_string "$MAP_NAME" "$((height - font_height - 1))" $((width - font_width * ${#MAP_NAME} - 1)) "$RED"
+    draw_string "$((moves / 10))$((moves % 10))" "$((LINES - font_height - 1))" 1 "$RED"
+    draw_string "$MAP_NAME" "$((LINES - font_height - 1))" $((COLUMNS - font_width * ${#MAP_NAME} - 1)) "$RED"
 }
 draw_string() {
     local string=$1
@@ -361,7 +366,7 @@ draw_keybinds() {
         esac
     done
     output="$RED$left$down$up$right$RESET: Movement, $output"
-    printf "\033[%d;%dH" $((height - 2)) $(( (width - ${#output} / 2) / 2 )) 
+    printf "\033[%d;%dH" $((LINES - 2)) $(( (COLUMNS - ${#output} / 2) / 2 )) 
     printf "%s" "${output%, }"
 }
 check_win() {
@@ -443,9 +448,10 @@ move() {
 parse_config
 load_map "$1"
 
+stty -echo -icanon time 0 min 0
 printf "%s" "$HIDE_CURSOR"
 
-trap 'printf "%s%s" "$SHOW_CURSOR" "$RESET"; exit' EXIT
+trap 'clean' EXIT
 # trap 'redraw' WINCH # doesnt work when blocked by another process so its shitty af
 
 redraw

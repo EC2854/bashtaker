@@ -3,7 +3,7 @@
 ![screenshot](screenshots/1.png) 
 
 # Requirements
-- `bash 4.0+` (associative arrays)
+- `bash 4.0+`
 - `jq` (for map loading)
 
 # How to play
